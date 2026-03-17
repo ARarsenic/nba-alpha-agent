@@ -154,33 +154,63 @@ def get_market_odds(match_dict: dict) -> dict:
 # ==========================================
 # Intelligence Scraper Helpers
 # ==========================================
-def _fetch_underdog_lineups() -> dict:
-    url = "https://api.selanet.ai/v1/browse"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.environ.get('SELANET_API_KEY', 'YOUR_API_KEY_HERE')}"
-    }
-    payload = {
-        "parse_only": True,
-        "x_params": {"feature": "profile", "username": "UnderdogNBA", "tab":"tweets"}
-    }
+def _fetch_fantasydata_lineups(target_date: str) -> dict:
+    url = f"https://fantasydata.com/nba/starting-lineups?date={target_date}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
     lineups_dict = {}
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        contents = resp.json().get("content", [])
-        for item in contents:
-            if item.get("content_type") == "tweet":
-                text = item.get("fields", {}).get("text", "")
-                if text.startswith("Lineup alert:"):
-                    match = re.search(r"Lineup alert: (.*?) (?:will start|list starters as) (.*?) on", text)
-                    if match:
-                        team_name = match.group(1).strip()
-                        players = [p.strip() for p in match.group(2).strip().split(',')]
-                        abbr = TEAM_MAPPING.get(team_name, team_name)
-                        lineups_dict[abbr] = players
+        soup = _make_soup(resp.text)
+        
+        games = soup.find_all("div", class_=lambda c: c and "game" in c.lower())
+        for game in games:
+            header = game.find("div", class_="header")
+            if not header: continue
+            
+            match_text = header.get_text(separator=' ', strip=True) 
+            split_at = match_text.split('@')
+            if len(split_at) < 2: continue
+            
+            away_team_name = split_at[0].strip()
+            home_part = split_at[1]
+            
+            # Extract home team name by removing the time (e.g. "Hornets 7:00 PM")
+            time_match = re.search(r'\d{1,2}:\d{2}\s*[AP]M', home_part)
+            if time_match:
+                home_team_name = home_part[:time_match.start()].strip()
+            else:
+                home_team_name = home_part.split()[0].strip()
+
+            lineup_div = game.find("div", class_="lineup")
+            if not lineup_div: continue
+            
+            def get_players(side):
+                side_div = lineup_div.find("div", class_=side)
+                if not side_div: return []
+                players = []
+                for p_div in side_div.find_all("div", class_="text-nowrap"):
+                    # Stop once we hit the "Injuries" section header
+                    strong = p_div.find("strong")
+                    if strong and "injuries" in strong.get_text(strip=True).lower():
+                        break
+                    a_tag = p_div.find("a")
+                    if a_tag:
+                        p_name = a_tag.get_text(strip=True)
+                        if p_name: players.append(p_name)
+                return players
+            
+            away_abbr = TEAM_MAPPING.get(away_team_name, away_team_name)
+            home_abbr = TEAM_MAPPING.get(home_team_name, home_team_name)
+            
+            away_players = get_players("away")
+            home_players = get_players("home")
+            
+            lineups_dict[away_abbr] = away_players
+            lineups_dict[home_abbr] = home_players
+            
     except Exception as e:
-        logger.error(f"Underdog Lineup Fetch Error: {e}")
+        logger.error(f"FantasyData Lineup Fetch Error: {e}")
     return lineups_dict
 
 def _fetch_cbs_injuries() -> dict:
@@ -386,7 +416,7 @@ def get_nba_intelligence(match_name: str, match_date: str = None) -> dict:
     if _last_scrape_date != match_date:
         logger.info(f"Building intelligence cache for {match_date}...")
         _injuries_cache = _fetch_cbs_injuries()
-        _lineups_cache = _fetch_underdog_lineups()
+        _lineups_cache = _fetch_fantasydata_lineups(match_date)
         _ctg_games_cache = _fetch_cleaning_the_glass(match_date)
         _last_scrape_date = match_date
 
