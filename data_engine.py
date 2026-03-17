@@ -1,5 +1,4 @@
 import logging
-import random
 import os
 import pytz
 import requests
@@ -465,6 +464,113 @@ def get_nba_intelligence(match_name: str, match_date: str = None) -> dict:
 
     return nba_intel
 
+def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> dict:
+    """
+    Stage 5: Settlement - Determine the real outcome of a finished NBA game.
+
+    Strategy:
+      1. Primary: NBA live scoreboard (nba_api) — look for the game by team abbr
+         and read the final score. The team with more points wins.
+      2. Secondary: Polymarket market price — if the condition_id is known and the
+         market is resolved (price == 1.0 or 0.0), use that as ground truth.
+      3. Fallback: return {"status": "PENDING"} so the trade stays open.
+
+    Returns dict with keys:
+      status   : "WIN" | "LOSS" | "PENDING"
+      method   : which source was used
+      details  : human-readable reason string
+    """
+    try:
+        away_abbr, home_abbr = match_name.split(" vs ")
+    except ValueError:
+        return {"status": "PENDING", "method": "error", "details": f"Invalid match_name: {match_name}"}
+
+    # ------------------------------------------------------------------ #
+    # 1) NBA API — live scoreboard                                          #
+    # ------------------------------------------------------------------ #
+    try:
+        board = scoreboard.ScoreBoard()
+        games = board.games.get_dict()
+        for game in games:
+            h = game["homeTeam"]["teamTricode"]
+            a = game["awayTeam"]["teamTricode"]
+            if {h, a} != {home_abbr, away_abbr}:
+                continue
+
+            status_text = game.get("gameStatusText", "").lower()
+            # Only settle if game is truly final
+            if "final" not in status_text:
+                return {
+                    "status": "PENDING",
+                    "method": "nba_api",
+                    "details": f"Game still in progress: {status_text}"
+                }
+
+            home_score = int(game["homeTeam"].get("score", 0))
+            away_score = int(game["awayTeam"].get("score", 0))
+
+            if home_score == away_score:
+                return {"status": "PENDING", "method": "nba_api", "details": "Tied — waiting for OT resolution"}
+
+            winner_abbr = home_abbr if home_score > away_score else away_abbr
+            is_win = (trade_side.upper() == winner_abbr.upper())
+            return {
+                "status": "WIN" if is_win else "LOSS",
+                "method": "nba_api",
+                "details": (
+                    f"{home_abbr} {home_score} - {away_abbr} {away_score}; "
+                    f"winner={winner_abbr}; bet_on={trade_side}"
+                )
+            }
+
+        logger.info(f"[{match_name}] Not found in today's NBA scoreboard — trying Polymarket...")
+    except Exception as e:
+        logger.warning(f"[{match_name}] NBA API error during settlement: {e}")
+
+    # ------------------------------------------------------------------ #
+    # 2) Polymarket — check resolved market price                           #
+    # ------------------------------------------------------------------ #
+    if pm_condition_id:
+        try:
+            url = "https://gamma-api.polymarket.com/markets"
+            params = {"conditionId": pm_condition_id}
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list) and data:
+                market = data[0]
+                outcomes_raw = market.get("outcomes", "[]")
+                prices_raw = market.get("outcomePrices", "[]")
+                outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else outcomes_raw
+                prices = [float(p) for p in (json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw)]
+
+                # Resolved market: one price == 1.0
+                for outcome, price in zip(outcomes, prices):
+                    if price >= 0.99:  # effectively settled to 1
+                        winning_team = outcome
+                        is_win = (trade_side.upper() in winning_team.upper() or
+                                  winning_team.upper() in trade_side.upper())
+                        return {
+                            "status": "WIN" if is_win else "LOSS",
+                            "method": "polymarket",
+                            "details": f"Polymarket resolved: {winning_team} won (price={price}); bet_on={trade_side}"
+                        }
+
+                logger.info(f"[{match_name}] Polymarket market not yet resolved.")
+        except Exception as e:
+            logger.warning(f"[{match_name}] Polymarket settlement check error: {e}")
+
+    # ------------------------------------------------------------------ #
+    # 3) Fallback — cannot settle yet                                       #
+    # ------------------------------------------------------------------ #
+    return {
+        "status": "PENDING",
+        "method": "none",
+        "details": "Could not determine result from NBA API or Polymarket"
+    }
+
+
 if __name__ == "__main__":
     print(get_market_odds({'game_id': 'xxxxxxx', 'home_team': 'Minnesota Timberwolves', 'home_team_abbr': 'MIN', 'away_team': 'Phoenix Suns', 'away_team_abbr': 'PHX', 'status': 'unstart', 'match_name': 'PHX vs MIN'}))  
     print(json.dumps(get_nba_intelligence('PHX vs MIN', '2026-03-17'), indent=2))
+    print(get_game_result('ORL vs ATL', 'xxxxxxx', 'ATL'))

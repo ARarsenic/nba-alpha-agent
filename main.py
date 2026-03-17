@@ -1,8 +1,8 @@
 import logging
 import json
-from data_engine import get_todays_matches, get_market_odds, get_nba_intelligence
+from data_engine import get_todays_matches, get_market_odds, get_nba_intelligence, get_game_result
 from llm_analyzer import analyze_match
-from db_manager import init_db, insert_trade, get_balance
+from db_manager import init_db, insert_trade, get_balance, get_pending_trades, update_trade_settlement
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -113,6 +113,50 @@ def daily_setup_and_execution():
         except Exception as e:
             logger.error(f"[{match_name}] Unexpected error processing match: {e}", exc_info=True)
             continue
+
+def settlement_job():
+    """
+    Stage 5: Daily Settlement of pending trades.
+    Queries real NBA scores via nba_api (primary) and Polymarket (secondary).
+    Trades that cannot yet be determined stay PENDING for the next run.
+    """
+    logger.info("=== Starting Settlement Job ===")
+
+    pending_trades = get_pending_trades()
+    if not pending_trades:
+        logger.info("No pending trades to settle. Skipping.")
+        return
+
+    for trade in pending_trades:
+        match_name = trade['match_name']
+        trade_id   = trade['id']
+        amount     = trade['amount']
+        buy_price  = trade['buy_price']
+        side       = trade['side']
+        condition_id = trade.get('pm_condition_id', '')
+
+        logger.info(f"Checking Trade #{trade_id}: {side} on {match_name}...")
+
+        result = get_game_result(match_name, condition_id, side)
+        status  = result["status"]
+        method  = result["method"]
+        details = result["details"]
+
+        if status == "PENDING":
+            logger.info(f"[{match_name}] Trade #{trade_id} still PENDING ({method}): {details}")
+            continue
+
+        if status == "WIN":
+            profit = round((amount / buy_price) - amount, 2)
+            update_trade_settlement(trade_id, "WIN", profit)
+            logger.info(f"[{match_name}] Trade #{trade_id} -> WIN  +{profit} USDC | {details}")
+        else:
+            loss = -amount
+            update_trade_settlement(trade_id, "LOSS", loss)
+            logger.info(f"[{match_name}] Trade #{trade_id} -> LOSS -{amount} USDC | {details}")
+
+    logger.info("=== Settlement Job Finished ===")
+
 
 if __name__ == "__main__":
     # Test execution manually
