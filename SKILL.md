@@ -12,7 +12,7 @@ env:
     description: Cleaning the Glass session cookie for advanced stats. Leave empty to skip CTG data.
 triggers:
   schedule:
-    - cron: "0 10 * * *"
+    - cron: "0 14 * * *"
       action: daily_setup_and_execution
       timezone: America/New_York
       description: Daily initialization, data aggregation and simulation trading
