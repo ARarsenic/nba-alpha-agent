@@ -1,0 +1,7 @@
+nba_api==1.4.1
+requests==2.31.0
+schedule==1.2.1
+pytz
+openai==1.14.3
+beautifulsoup4==4.14.3
+lxml

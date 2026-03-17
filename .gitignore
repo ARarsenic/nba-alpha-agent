@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# SQLite databases (local paper trading ledger)
+data/*.db
+data/*.sqlite3
+data/*.sqlite
+
+# Logs and debug files
+*.log
+
+# Caches
+.pytest_cache/
+.coverage
+coverage.xml
+
+# Local API Keys and Secrets
+# DO NOT COMMIT SECRETS!
+.env.local
+.env.development
+
+# Tests
+test/
