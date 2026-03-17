@@ -5,9 +5,17 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
+# Guard: fail fast if API key is missing rather than crashing mid-pipeline
+_api_key = os.getenv("DASHSCOPE_API_KEY")
+if not _api_key:
+    raise EnvironmentError(
+        "DASHSCOPE_API_KEY environment variable is not set. "
+        "Please configure it before starting the skill."
+    )
+
 # Setting OpenAI client to use DashScope compatible mode
 client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    api_key=_api_key,
     base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 )
 

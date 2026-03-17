@@ -147,6 +147,11 @@ def settlement_job():
             continue
 
         if status == "WIN":
+            if buy_price < 0.05:
+                # Guard: near-zero price would produce unrealistic PnL; treat as LOSS
+                logger.warning(f"[{match_name}] Trade #{trade_id} WIN but buy_price={buy_price} < 0.05 — marking LOSS to prevent bad PnL.")
+                update_trade_settlement(trade_id, "LOSS", -amount)
+                continue
             profit = round((amount / buy_price) - amount, 2)
             update_trade_settlement(trade_id, "WIN", profit)
             logger.info(f"[{match_name}] Trade #{trade_id} -> WIN  +{profit} USDC | {details}")

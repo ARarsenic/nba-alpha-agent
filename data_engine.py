@@ -4,7 +4,7 @@ import pytz
 import requests
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from nba_api.live.nba.endpoints import scoreboard
@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 BLACKLIST_WORDS = ["series", "champion", "advance", "draft", "mvp", "rookie", "make playoffs"]
 _polymarket_cache = None
+_polymarket_cache_date = None  # Invalidate cache daily
+
+# Cleaning the Glass session ID from environment variable (never hardcode)
+_CTG_COOKIE = f"sessionid={os.getenv('CTG_SESSION_ID', '')}"
 
 # Mapping from Mascot/Nickname to NBA Team Abbreviation
 # Mapping from Mascot/Nickname/City to NBA Team Abbreviation
@@ -95,17 +99,19 @@ def get_market_odds(match_dict: dict) -> dict:
     """
     Stage 2: Market Data - Polymarket Gamma API.
     """
-    global _polymarket_cache
+    global _polymarket_cache, _polymarket_cache_date
     match_name = match_dict["match_name"]
     logger.info(f"[{match_name}] Fetching market odds...")
-    
-    if _polymarket_cache is None:
+
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    if _polymarket_cache is None or _polymarket_cache_date != today:
         url = "https://gamma-api.polymarket.com/events"
         params = {"closed": "false", "active": "true", "tag_id": "745", "limit": 100}
         try:
             resp = requests.get(url, params=params, timeout=5)
             resp.raise_for_status()
             _polymarket_cache = resp.json()
+            _polymarket_cache_date = today
         except Exception as e:
             logger.error(f"Polymarket API Error: {e}")
             _polymarket_cache = []
@@ -131,9 +137,8 @@ def get_market_odds(match_dict: dict) -> dict:
                 if len(outcomes) == 2 and (home_short in outcomes[0] or home_short in outcomes[1]):
                     end_date_str = market.get("endDate", "")
                     if end_date_str:
-                        # timezone naive vs UTC
                         end_date_utc = datetime.strptime(end_date_str, "%Y-%m-%dT%H:%M:%SZ")
-                        now_utc = datetime.utcnow()
+                        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                         if (end_date_utc - now_utc) > timedelta(days=3):
                             continue
                     
@@ -260,8 +265,7 @@ def _fetch_cbs_injuries() -> dict:
 
 def _fetch_cleaning_the_glass(target_date: str) -> list:
     BASE = "https://www.cleaningtheglass.com"
-    COOKIE = "sessionid=wjkiiql5mzglpf585mxv4irn2t6asrz1"
-    headers = {"User-Agent": "Mozilla/5.0", "Cookie": COOKIE}
+    headers = {"User-Agent": "Mozilla/5.0", "Cookie": _CTG_COOKIE}
     url = f"{BASE}/stats/games?date={target_date}"
     all_games = []
     try:
@@ -358,8 +362,7 @@ def _extract_preview_tables(soup, title_keyword):
     return data
 
 def _fetch_game_preview_stats(url: str) -> dict:
-    COOKIE = "sessionid=wjkiiql5mzglpf585mxv4irn2t6asrz1"
-    headers = {"User-Agent": "Mozilla/5.0", "Cookie": COOKIE}
+    headers = {"User-Agent": "Mozilla/5.0", "Cookie": _CTG_COOKIE}
     results = {}
     try:
         resp = requests.get(url, headers=headers, timeout=10)
@@ -513,7 +516,12 @@ def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> d
                 return {"status": "PENDING", "method": "nba_api", "details": "Tied — waiting for OT resolution"}
 
             winner_abbr = home_abbr if home_score > away_score else away_abbr
-            is_win = (trade_side.upper() == winner_abbr.upper())
+            # trade_side may be a full team name from Polymarket (e.g. "Minnesota Timberwolves")
+            # winner_abbr is a tricode (e.g. "MIN") — use substring matching in both directions
+            ts = trade_side.upper()
+            wa = winner_abbr.upper()
+            is_win = (ts == wa or ts in wa or wa in ts or
+                      home_abbr.upper() in ts or away_abbr.upper() in ts and wa == away_abbr.upper())
             return {
                 "status": "WIN" if is_win else "LOSS",
                 "method": "nba_api",
