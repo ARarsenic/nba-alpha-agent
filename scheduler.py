@@ -17,7 +17,7 @@ def start_scheduler():
     logger.info("Starting NBA Alpha Agent local scheduler...")
 
     # schedule uses local time; ensure server runs on US Eastern time or adjust accordingly
-    schedule.every().day.at("10:00").do(daily_setup_and_execution)
+    schedule.every().day.at("14:00").do(daily_setup_and_execution)
     schedule.every().day.at("02:00").do(settlement_job)
 
     while True:
