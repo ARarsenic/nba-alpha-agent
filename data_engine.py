@@ -1,4 +1,6 @@
 import logging
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import pytz
 import requests
@@ -516,18 +518,16 @@ def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> d
                 return {"status": "PENDING", "method": "nba_api", "details": "Tied — waiting for OT resolution"}
 
             winner_abbr = home_abbr if home_score > away_score else away_abbr
-            # trade_side may be a full team name from Polymarket (e.g. "Minnesota Timberwolves")
-            # winner_abbr is a tricode (e.g. "MIN") — use substring matching in both directions
-            ts = trade_side.upper()
-            wa = winner_abbr.upper()
-            is_win = (ts == wa or ts in wa or wa in ts or
-                      home_abbr.upper() in ts or away_abbr.upper() in ts and wa == away_abbr.upper())
+            # trade_side may be a Polymarket full name (e.g. "Knicks") or tricode (e.g. "NYK").
+            # Normalise it to tricode via TEAM_MAPPING so the comparison is always exact.
+            trade_abbr = TEAM_MAPPING.get(trade_side, TEAM_MAPPING.get(trade_side.split()[-1], trade_side)).upper()
+            is_win = (trade_abbr == winner_abbr.upper())
             return {
                 "status": "WIN" if is_win else "LOSS",
                 "method": "nba_api",
                 "details": (
                     f"{home_abbr} {home_score} - {away_abbr} {away_score}; "
-                    f"winner={winner_abbr}; bet_on={trade_side}"
+                    f"winner={winner_abbr}; bet_on={trade_side} (resolved_abbr={trade_abbr})"
                 )
             }
 
@@ -556,12 +556,15 @@ def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> d
                 for outcome, price in zip(outcomes, prices):
                     if price >= 0.99:  # effectively settled to 1
                         winning_team = outcome
-                        is_win = (trade_side.upper() in winning_team.upper() or
-                                  winning_team.upper() in trade_side.upper())
+                        # Both trade_side and winning_team may be Polymarket full names —
+                        # normalise both to tricode for a reliable comparison.
+                        winning_abbr = TEAM_MAPPING.get(winning_team, TEAM_MAPPING.get(winning_team.split()[-1], winning_team)).upper()
+                        trade_abbr   = TEAM_MAPPING.get(trade_side,   TEAM_MAPPING.get(trade_side.split()[-1],   trade_side)).upper()
+                        is_win = (trade_abbr == winning_abbr)
                         return {
                             "status": "WIN" if is_win else "LOSS",
                             "method": "polymarket",
-                            "details": f"Polymarket resolved: {winning_team} won (price={price}); bet_on={trade_side}"
+                            "details": f"Polymarket resolved: {winning_team} (abbr={winning_abbr}) won (price={price}); bet_on={trade_side} (abbr={trade_abbr})"
                         }
 
                 logger.info(f"[{match_name}] Polymarket market not yet resolved.")
@@ -579,6 +582,6 @@ def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> d
 
 
 if __name__ == "__main__":
-    print(get_market_odds({'game_id': 'xxxxxxx', 'home_team': 'Minnesota Timberwolves', 'home_team_abbr': 'MIN', 'away_team': 'Phoenix Suns', 'away_team_abbr': 'PHX', 'status': 'unstart', 'match_name': 'PHX vs MIN'}))  
-    print(json.dumps(get_nba_intelligence('PHX vs MIN', '2026-03-17'), indent=2))
-    print(get_game_result('ORL vs ATL', 'xxxxxxx', 'ATL'))
+    #print(get_market_odds({'game_id': 'xxxxxxx', 'home_team': 'Minnesota Timberwolves', 'home_team_abbr': 'MIN', 'away_team': 'Phoenix Suns', 'away_team_abbr': 'PHX', 'status': 'unstart', 'match_name': 'PHX vs MIN'}))  
+    #print(json.dumps(get_nba_intelligence('PHX vs MIN', '2026-03-17'), indent=2))
+    print(get_game_result('IND vs NYK', '0xb332ab0f289b2b6628569a20d13b1de4ba8e18e8d02b0a442079e7f9c2fa2a6b', 'Knicks'))

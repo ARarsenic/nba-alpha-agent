@@ -5,3 +5,4 @@ pytz
 openai==1.14.3
 beautifulsoup4==4.14.3
 lxml
+python-dotenv
