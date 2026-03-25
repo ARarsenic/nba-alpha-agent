@@ -37,3 +37,7 @@ coverage.xml
 
 # Tests
 test/
+
+# Wallet
+keystore.json
+data/keystore.json

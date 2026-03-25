@@ -7,14 +7,15 @@
 ```text
 nba_alpha_agent/
 ├── skill.json           # 技能定义，向 OpenClaw 暴露定时任务和触发接口
-├── main.py              # 核心控制流 (Pipeline 调度)
+├── main.py              # 核心控制流 (Pipeline 调度，包含执行与结算任务)
+├── wallet_manager.py    # Web3/Polygon 实盘资金、私钥管理与交易签名
 ├── data_engine.py       # 数据聚合器 (Gamma API, NBA 慢数据, 伤病快数据, 高阶数据)
 ├── llm_analyzer.py      # 封装 System Prompts 和 Risk 判断逻辑
-├── db_manager.py        # SQLite 数据库操作 (下单、更新状态)
-├── scheduler.py         # 定时任务模块 (Cron / APScheduler)
-├── requirements.txt     # 依赖包 (nba_api, sqlite3, requests, schedule)
+├── db_manager.py        # SQLite 数据库操作 (记录实盘订单与状态)
+├── scheduler.py         # 定时触发器 (仅负责定时调用 main.py 中的任务)
+├── requirements.txt     # 依赖包 (nba_api, sqlite3, requests, schedule, web3)
 └── data/
-    └── paper_ledger.db  # 本地模拟盘数据库
+    └── live_ledger.db   # 本地实盘日志数据库 (记录 LLM 推理和交易哈希)
 
 ```
 
@@ -26,7 +27,7 @@ nba_alpha_agent/
 
 ### 阶段 1：全局初始化 (Daily Setup)
 
-* **时间点**：每天上午 10:00 (东部时间，通常各队伤病报告初步更新)。
+* **时间点**：每天下午 14:00 (东部时间，通常各队伤病报告初步更新)。
 * **动作**：`data_engine.get_todays_matches()` 获取当天所有比赛列表。
 
 ### 阶段 2：数据聚合与组装 (For 每一场比赛)
@@ -48,36 +49,38 @@ nba_alpha_agent/
 * **第一层：Risk 评估**：如果发现“核心首发当天交易”、“赛前 1 小时 3 名主力 GTD”等极高不确定性情况，LLM 必须输出 `{"action": "SKIP", "reason": "高不确定性"}`。
 * **第二层：胜率推演**：如果 Risk 通过，LLM 基于硬数据和高阶战术数据，输出一个具体的预测行动和依据。
 
-### 阶段 4：执行模拟下单 (Execution)
+### 阶段 4：实盘执行与签名下单 (Execution)
 
 对比 `LLM_Win_Rate` 与 `Polymarket_Implied_Odds (市价)`：
 
 * **买 YES 触发**：`LLM_Win_Rate > PM_Odds + 0.05`
 * **买 NO 触发**：`LLM_Win_Rate < PM_Odds - 0.05`
-* **记录入库**：调用 `db_manager`，将订单写入 SQLite，状态标记为 `PENDING`。
+* **实盘执行**：
+  1. 调用 `wallet_manager` 检查真实的 USDC 余额和 MATIC (Gas)。
+  2. 根据余额和凯利公式等计算真实的下注金额。
+  3. 进行订单路由（Order Routing）并签名交易。
+  4. 将交易广播到 Polygon 链/Polymarket 平台，获取真实的 `tx_hash`。
+  5. 确认成功后，调用 `db_manager` 将订单与推理逻辑写入本地 SQLite，状态标记为 `SUBMITTED`。
 
-### 阶段 5：自动结算与复盘 (Post-Match Settlement)
+### 阶段 5：链上结算与提款 (Post-Match Settlement)
 
-* **触发机制**：系统每天凌晨 2:00 运行一次 `settlement_job`。
-* **动作**：查询数据库中状态为 `PENDING` 的订单，通过 NBA API 获取真实比分。
-* **结算**：如果是赢单，更新状态为 `WIN` 并计算利润；如果是输单，更新为 `LOSS`。*(注意：由于 Polymarket 结算可能有延迟，用 NBA 官方比分结算模拟盘更准更实时)*。
+* **触发机制**：由 `scheduler.py` 内部的定时器（或 Skill 平台的 Cron）定时触发执行 `main.py` 中的 `settlement_job`。
+* **动作**：
+  1. 查询本地数据库中状态为 `SUBMITTED` 或 `PENDING_SETTLEMENT` 的订单。
+  2. 调用 Polymarket API / 智能合约，依靠 **UMA 预言机状态** 判断该市场是否已 `RESOLVED`。
+* **结算提款**：
+  - 如果预言机判定为赢单，系统自动发起一笔链上的 `Claim`（索赔提取）交易，将赢得的 USDC 提回钱包。完成提取后，本地状态更新为 `WIN` 并记录真实 PnL。
+  - 如果输单，将状态更新为 `LOSS`。
 
 ---
 
 ## 三、 SQLite 数据库设计 (db_manager.py)
 
-包含两张核心表：`portfolio` 和 `paper_trades`。
+实盘状态下，不再使用虚拟的 `portfolio` 表记账，真实资金由链上查询。数据库降级为记录 LLM 推理和订单状态的日志簿。
+核心表为：`live_trades`。
 
-### 1. 资产组合 (portfolio)
-用于跟踪系统的总资金余额。
-
-| 字段名 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | INTEGER | 主键 (固定为 1) |
-| `balance` | REAL | 系统当前可用资金余额 (USDC)，初始 1000 |
-
-### 2. 模拟交易记录 (paper_trades)
-用于全面记录系统下过的每一笔订单。
+### 实盘交易记录 (live_trades)
+用于全面记录系统下过的每一笔真实订单及关联的链上信息。
 
 | 字段名 | 类型 | 说明 |
 | --- | --- | --- |
@@ -86,13 +89,15 @@ nba_alpha_agent/
 | `match_name` | TEXT | 比赛名称 (如 LAL vs DEN) |
 | `pm_condition_id` | TEXT | Polymarket 的唯一事件 ID |
 | `side` | TEXT | `YES` 或 `NO` 或者具体的队名 |
-| `buy_price` | REAL | 买入价 (已含 0.5% 模拟滑点) |
-| `amount` | REAL | 下注金额 (USDC) |
+| `buy_price` | REAL | 真实的平均执行价 |
+| `amount` | REAL | 真实下注金额 (USDC) |
 | `ai_prob` | REAL | LLM 预测胜率 |
 | `pm_prob` | REAL | 下单时的市场隐含胜率 |
+| `llm_model` | TEXT | 使用的 LLM 模型 |
 | `llm_reasoning` | TEXT | LLM 给出的下单理由 (用于人工复盘) |
-| `status` | TEXT | `PENDING`, `WIN`, `LOSS` |
-| `pnl` | REAL | 盈亏金额 |
+| `tx_hash` | TEXT | 链上交易哈希 |
+| `status` | TEXT | `SUBMITTED`, `PENDING_SETTLEMENT`, `WIN`, `LOSS`, `FAILED` |
+| `pnl` | REAL | 盈亏金额（扣除 Gas 后净利润/亏损） |
 
 ---
 
