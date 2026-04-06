@@ -222,29 +222,37 @@ def _fetch_fantasydata_lineups(target_date: str) -> dict:
 def _fetch_cbs_injuries() -> dict:
     base_url = 'https://www.cbssports.com'
     injuries_url = f'{base_url}/nba/injuries/'
+    headers = {"User-Agent": "Mozilla/5.0"}
     league_report = {}
     try:
-        res = requests.get(injuries_url, timeout=10)
+        res = requests.get(injuries_url, headers=headers, timeout=10)
         soup = _make_soup(res.text)
-        injury_table = soup.find('div', class_='Page-colMain')
-        if not injury_table:
+        
+        teams = soup.find_all('div', class_='TableBaseWrapper')
+        if not teams:
             return {}
-        teams = injury_table.find_all('div', id='TableBase')
+            
         for team in teams:
-            team_name = team.find('span', class_='TeamName').string
+            team_span = team.find('span', class_='TeamName')
+            if not team_span:
+                continue
+            team_name = team_span.get_text(separator=" ", strip=True)
             abbr = TEAM_MAPPING.get(team_name, team_name)
             
             team_injuries = []
             table = team.find('table', class_='TableBase-table')
             if table:
-                headers = [th.string for th in table.find_all('th')]
+                headers = [th.get_text(separator=" ", strip=True) for th in table.find_all('th')]
                 players = table.find('tbody').find_all('tr')
                 for player in players:
                     p_data = {}
                     for h, d in zip(headers, player.find_all('td')):
                         h_strip = h.strip()
                         if h_strip == "Player":
-                            if d.contents and d.contents[-1].string:
+                            long_name = d.find('span', class_='CellPlayerName--long')
+                            if long_name:
+                                p_data[h_strip] = long_name.get_text(strip=True)
+                            elif d.contents and getattr(d.contents[-1], "string", None):
                                 p_data[h_strip] = d.contents[-1].string.strip()
                             else:
                                 p_data[h_strip] = d.get_text(separator=" ", strip=True)
@@ -582,6 +590,6 @@ def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> d
 
 
 if __name__ == "__main__":
-    #print(get_market_odds({'game_id': 'xxxxxxx', 'home_team': 'Minnesota Timberwolves', 'home_team_abbr': 'MIN', 'away_team': 'Phoenix Suns', 'away_team_abbr': 'PHX', 'status': 'unstart', 'match_name': 'PHX vs MIN'}))  
-    #print(json.dumps(get_nba_intelligence('PHX vs MIN', '2026-03-17'), indent=2))
-    print(get_game_result('IND vs NYK', '0xb332ab0f289b2b6628569a20d13b1de4ba8e18e8d02b0a442079e7f9c2fa2a6b', 'Knicks'))
+    #print(get_market_odds({'game_id': 'xxxxxxx', 'home_team': 'Minnesota Timberwolves', 'home_team_abbr': 'MIN', 'away_team': 'Charlotte Hornetsx', 'away_team_abbr': 'CHA', 'status': 'unstart', 'match_name': 'CHA vs MIN'}))  
+    print(json.dumps(get_nba_intelligence('CLE vs MEM', '2026-04-06'), indent=2))
+    #print(get_game_result('IND vs NYK', '0xb332ab0f289b2b6628569a20d13b1de4ba8e18e8d02b0a442079e7f9c2fa2a6b', 'Knicks'))
