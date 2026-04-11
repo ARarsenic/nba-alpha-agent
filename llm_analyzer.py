@@ -19,7 +19,7 @@ if not _api_key or not model_name:
 # Setting OpenAI client to use DashScope compatible mode
 client = OpenAI(
     api_key=_api_key,
-    base_url="https://openrouter.ai/api/v1"
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
 SYSTEM_PROMPT = """You are an elite, cold-blooded quantitative NBA sports betting analyst. Your sole objective is to identify +EV (Positive Expected Value) betting opportunities on Polymarket by exploiting mispriced NBA moneyline markets. You do not care about narratives, team popularity, or emotional storylines. You only care about data, tactical matchups, and structural advantages.
@@ -129,7 +129,7 @@ def analyze_match(match_name: str, odds: dict, intel: dict) -> dict:
         return parsed_result
     except Exception as e:
         logger.error(f"[{match_name}] OpenAI API Request Failed: {e}")
-        logger.error("Please see https://openrouter.ai/docs/faq for more information.")
+        logger.error("Please see https://ai.google.dev/gemini-api/docs/ for more information.")
         
         # Return a safe fallback to prevent downstream crashes
         return {
