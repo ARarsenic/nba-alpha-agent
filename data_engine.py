@@ -591,5 +591,5 @@ def get_game_result(match_name: str, pm_condition_id: str, trade_side: str) -> d
 
 if __name__ == "__main__":
     #print(get_market_odds({'game_id': 'xxxxxxx', 'home_team': 'Minnesota Timberwolves', 'home_team_abbr': 'MIN', 'away_team': 'Charlotte Hornetsx', 'away_team_abbr': 'CHA', 'status': 'unstart', 'match_name': 'CHA vs MIN'}))  
-    print(json.dumps(get_nba_intelligence('CLE vs MEM', '2026-04-06'), indent=2))
+    print(json.dumps(get_nba_intelligence('GSW vs SAC', '2026-04-10'), indent=2))
     #print(get_game_result('IND vs NYK', '0xb332ab0f289b2b6628569a20d13b1de4ba8e18e8d02b0a442079e7f9c2fa2a6b', 'Knicks'))

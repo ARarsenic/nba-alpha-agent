@@ -8,8 +8,9 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 # Guard: fail fast if API key is missing rather than crashing mid-pipeline
+model_name = os.getenv("MODEL_NAME")
 _api_key = os.getenv("DASHSCOPE_API_KEY")
-if not _api_key:
+if not _api_key or not model_name:
     raise EnvironmentError(
         "DASHSCOPE_API_KEY environment variable is not set. "
         "Please configure it before starting the skill."
@@ -18,7 +19,7 @@ if not _api_key:
 # Setting OpenAI client to use DashScope compatible mode
 client = OpenAI(
     api_key=_api_key,
-    base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    base_url="https://openrouter.ai/api/v1"
 )
 
 SYSTEM_PROMPT = """You are an elite, cold-blooded quantitative NBA sports betting analyst. Your sole objective is to identify +EV (Positive Expected Value) betting opportunities on Polymarket by exploiting mispriced NBA moneyline markets. You do not care about narratives, team popularity, or emotional storylines. You only care about data, tactical matchups, and structural advantages.
@@ -54,9 +55,9 @@ If the risk is acceptable, calculate the True Win Probability for BOTH the home 
 Use `game_context` to map your probabilities to Polymarket YES/NO sides:
 - Look up which team is `yes_team` and which is `no_team`.
 - Compare your true probability for `yes_team` vs `yes_price` (implied probability).
-- If (your_yes_team_prob - yes_price) >= 0.05 -> Edge found. Action: "BUY YES".
-- If (yes_price - your_yes_team_prob) >= 0.05 -> Edge found (no_team is undervalued). Action: "BUY NO".
-- Otherwise -> "SKIP" (No edge).
+- If (your_yes_team_prob - yes_price) >= 0.05 -> Edge found. Action: "BUY", target_team: "[name of yes_team]".
+- If (yes_price - your_yes_team_prob) >= 0.05 -> Edge found (no_team is undervalued). Action: "BUY", target_team: "[name of no_team]".
+- Otherwise -> Action: "SKIP".
 
 ### OUTPUT FORMAT (STRICT JSON ONLY)
 You must output your final decision in valid JSON format. Do NOT wrap the JSON in markdown code blocks. Do NOT output any conversational text. Use the following schema:
@@ -73,7 +74,8 @@ You must output your final decision in valid JSON format. Do NOT wrap the JSON i
     "key_factors": ["Factor 1", "Factor 2"]
   },
   "decision": {
-    "action": "BUY YES" | "BUY NO" | "SKIP",
+    "action": "BUY" | "SKIP",
+    "target_team": "Team Name (e.g. Warriors) or null if SKIP",
     "edge_percentage": 0.00,
     "reasoning": "A concise, 2-sentence logical justification for the trade ledger."
   }
@@ -112,7 +114,7 @@ def analyze_match(match_name: str, odds: dict, intel: dict) -> dict:
     
     try:
         response = client.chat.completions.create(
-            model="qwen-plus",
+            model=model_name,
             messages=messages,
             temperature=0.2,
             response_format={"type": "json_object"},
@@ -122,12 +124,12 @@ def analyze_match(match_name: str, odds: dict, intel: dict) -> dict:
         
         # Parse result directly since response_format is json_object
         parsed_result = json.loads(content)
-        parsed_result["llm_model"] = "qwen-plus"
+        parsed_result["llm_model"] = model_name
         
         return parsed_result
     except Exception as e:
         logger.error(f"[{match_name}] OpenAI API Request Failed: {e}")
-        logger.error("请参考文档：https://www.alibabacloud.com/help/model-studio/developer-reference/error-code")
+        logger.error("Please see https://openrouter.ai/docs/faq for more information.")
         
         # Return a safe fallback to prevent downstream crashes
         return {

@@ -102,6 +102,7 @@ def daily_setup_and_execution():
                 
             decision = llm_response.get("decision", {})
             action = decision.get("action")
+            target_team = decision.get("target_team")
             reasoning = decision.get("reasoning", "No reason provided")
             
             if action == "SKIP":
@@ -139,16 +140,28 @@ def daily_setup_and_execution():
             else:
                 ai_prob = away_prob
                 
-            if action == "BUY YES":
-                trade_side = yes_team
-                target_price = round(min(0.99, pm_yes_prob * 1.005), 3) # Max price we are willing to pay (+0.5% slippage)
-                edge_found = True
-                is_yes = True
-            elif action == "BUY NO":
-                trade_side = no_team
-                target_price = round(min(0.99, pm_no_prob * 1.005), 3)
-                edge_found = True
-                is_yes = False
+            if action == "BUY":
+                if not target_team:
+                    logger.warning(f"[{match_name}] LLM returned BUY but no target_team. Skipping.")
+                    continue
+                    
+                target_upper = target_team.upper()
+                yes_upper = yes_team.upper()
+                no_upper = no_team.upper()
+                
+                if target_upper in yes_upper or yes_upper in target_upper:
+                    trade_side = yes_team
+                    target_price = round(min(0.99, pm_yes_prob * 1.005), 3) # Max price we are willing to pay (+0.5% slippage)
+                    edge_found = True
+                    is_yes = True
+                elif target_upper in no_upper or no_upper in target_upper:
+                    trade_side = no_team
+                    target_price = round(min(0.99, pm_no_prob * 1.005), 3)
+                    edge_found = True
+                    is_yes = False
+                else:
+                    logger.warning(f"[{match_name}] Mismatch between target_team '{target_team}' and PM teams (yes: {yes_team}, no: {no_team}). Skipping.")
+                    continue
                 
             if edge_found and trade_side:
                 yes_token, no_token = _get_token_ids_for_condition(condition_id)
