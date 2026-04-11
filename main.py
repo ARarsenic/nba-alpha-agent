@@ -41,7 +41,6 @@ def daily_setup_and_execution():
             
         try:
             # Stage 2: Data Aggregation
-            print(match)
             odds = get_market_odds(match)
             if not odds:
                 continue
@@ -96,16 +95,22 @@ def daily_setup_and_execution():
             else:
                 ai_prob = away_prob
                 
-            if action == "BUY YES":
-                trade_side = yes_team
-                trade_price = round(pm_yes_prob * 1.005, 4) 
-                edge_found = True
-                logger.info(f"[{match_name}] LLM executed BUY YES. Buying {trade_side}.")
-            elif action == "BUY NO":
-                trade_side = no_team
-                trade_price = round(pm_no_prob * 1.005, 4)
-                edge_found = True
-                logger.info(f"[{match_name}] LLM executed BUY NO. Buying {trade_side}.")
+            if action == "BUY":
+                target_team = decision.get("target_team", "")
+                
+                # Dynamic mapping of target_team to yes_team or no_team
+                if target_team and (target_team.upper() in yes_team.upper() or yes_team.upper() in target_team.upper()):
+                    trade_side = yes_team
+                    trade_price = round(pm_yes_prob * 1.005, 4)
+                    edge_found = True
+                    logger.info(f"[{match_name}] LLM executed BUY for target_team '{target_team}'. Matched YES side: {trade_side}.")
+                elif target_team and (target_team.upper() in no_team.upper() or no_team.upper() in target_team.upper()):
+                    trade_side = no_team
+                    trade_price = round(pm_no_prob * 1.005, 4)
+                    edge_found = True
+                    logger.info(f"[{match_name}] LLM executed BUY for target_team '{target_team}'. Matched NO side: {trade_side}.")
+                else:
+                    logger.warning(f"[{match_name}] LLM Action=BUY, but target_team '{target_team}' did not match YES '{yes_team}' or NO '{no_team}'. Holding.")
             else:
                 logger.info(f"[{match_name}] LLM recommended SKIP. Holding.")
                 
