@@ -1,5 +1,17 @@
+import os
+import sys
 import logging
 import json
+
+# Ensure environment variables are loaded from .env
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(env_path):
+    with open(env_path) as f:
+        for line in f:
+            if line.strip() and not line.startswith("#"):
+                key, val = line.strip().split("=", 1)
+                os.environ[key] = val
+
 from data_engine import get_todays_matches, get_market_odds, get_nba_intelligence, get_game_result
 from llm_analyzer import analyze_match
 from db_manager import init_db, insert_trade, get_balance, get_pending_trades, update_trade_settlement
@@ -113,6 +125,9 @@ def daily_setup_and_execution():
         except Exception as e:
             logger.error(f"[{match_name}] Unexpected error processing match: {e}", exc_info=True)
             continue
+    
+    logger.info("=== Daily Pipeline Done. Invoking Agent for Summary ===")
+    os.system("""openclaw agent --channel telegram --to 7162183556 --reply-channel telegram --reply-to 7162183556 --message "我是系统 cron：今天 NBA_Alpha_Agent 数据初始化和模拟下注已完成。请你读取 ~/.openclaw/workspace/skills/nba_alpha_agent/data/paper_ledger.db 今天新增的 PENDING 订单，如果数量大于 0，向我汇报下注了哪些队伍和简单理由；如果没有订单，向我报告今天没有下注。" """)
 
 def settlement_job():
     """
@@ -125,6 +140,7 @@ def settlement_job():
     pending_trades = get_pending_trades()
     if not pending_trades:
         logger.info("No pending trades to settle. Skipping.")
+        os.system("""openclaw agent --channel telegram --to 7162183556 --reply-channel telegram --reply-to 7162183556 --message "我是系统 cron：今天 NBA_Alpha_Agent 结算环节已完成。请查询 ~/.openclaw/workspace/skills/nba_alpha_agent/data/paper_ledger.db，如果昨天或今天有已结算的订单，向我汇报盈亏和总资金；如果没有结算订单，就报告没有订单需要结算。" """)
         return
 
     for trade in pending_trades:
@@ -160,7 +176,8 @@ def settlement_job():
             update_trade_settlement(trade_id, "LOSS", loss)
             logger.info(f"[{match_name}] Trade #{trade_id} -> LOSS -{amount} USDC | {details}")
 
-    logger.info("=== Settlement Job Finished ===")
+    logger.info("=== Settlement Job Finished. Invoking Agent for Summary ===")
+    os.system("""openclaw agent --channel telegram --to 7162183556 --reply-channel telegram --reply-to 7162183556 --message "我是系统 cron：今天 NBA_Alpha_Agent 结算环节已完成。请你查询 ~/.openclaw/workspace/skills/nba_alpha_agent/data/paper_ledger.db 里最近结算完成的订单结果（WIN/LOSS）、盈亏，以及 portfolio 总资金，并向我做汇报总结。" """)
 
 
 if __name__ == "__main__":
