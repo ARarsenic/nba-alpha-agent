@@ -9,17 +9,18 @@ logger = logging.getLogger(__name__)
 
 # Guard: fail fast if API key is missing rather than crashing mid-pipeline
 model_name = os.getenv("MODEL_NAME")
+openai_base_url = os.getenv("OPENAI_BASE_URL")
 _api_key = os.getenv("DASHSCOPE_API_KEY")
-if not _api_key or not model_name:
+if not _api_key or not model_name or not openai_base_url:
     raise EnvironmentError(
-        "DASHSCOPE_API_KEY environment variable is not set. "
+        "API environment variables are not set. "
         "Please configure it before starting the skill."
     )
 
 # Setting OpenAI client to use DashScope compatible mode
 client = OpenAI(
     api_key=_api_key,
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+    base_url=openai_base_url
 )
 
 SYSTEM_PROMPT = """You are an elite, cold-blooded quantitative NBA sports betting analyst. Your sole objective is to identify +EV (Positive Expected Value) betting opportunities on Polymarket by exploiting mispriced NBA moneyline markets. You do not care about narratives, team popularity, or emotional storylines. You only care about data, tactical matchups, and structural advantages.
@@ -129,7 +130,7 @@ def analyze_match(match_name: str, odds: dict, intel: dict) -> dict:
         return parsed_result
     except Exception as e:
         logger.error(f"[{match_name}] OpenAI API Request Failed: {e}")
-        logger.error("Please see https://ai.google.dev/gemini-api/docs/ for more information.")
+        logger.error("Please see the related docs for more information.")
         
         # Return a safe fallback to prevent downstream crashes
         return {
